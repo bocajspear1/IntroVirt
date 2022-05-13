@@ -13,6 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+/*
+
+    ivguestinfo prints information about the guest system, such as build version.
+    Currently supports Windows.
+
+ */
+
 #include <introvirt/introvirt.hh>
 
 #include <boost/algorithm/string.hpp>
@@ -100,7 +108,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Pause it
+    // Pause the domain's execution
     domain->pause();
 
     std::cout << "---------\n";
@@ -116,7 +124,7 @@ int main(int argc, char** argv) {
         print_guest_information(static_cast<WindowsGuest&>(*guest), vm);
     }
 
-    // Resume it
+    // Resume the domain
     domain->resume();
 
     return 0;

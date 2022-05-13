@@ -14,6 +14,13 @@
  * limitations under the License.
  */
 
+
+/*
+
+    ivwritefile writes a file to a location in the guest.
+    Currently supports Windows.
+
+ */
 #include <introvirt/introvirt.hh>
 
 #include <boost/algorithm/string.hpp>
@@ -77,6 +84,7 @@ class WriteFileTool final : public EventCallback {
         }
 
         // Allocate some structures in the guest
+        // inject::* injects syscalls into the guest transparently to allocate memory
     retry:
         auto dst_path = inject::allocate<nt::UNICODE_STRING>("\\??\\" + dst_path_);
         auto object_attributes = inject::allocate<nt::OBJECT_ATTRIBUTES>();
@@ -88,6 +96,7 @@ class WriteFileTool final : public EventCallback {
 
         // Open the destination file in the guest
         uint64_t dst_file;
+        // Inject a call to NtCreateFile to create/open the file in the guest
         nt::NTSTATUS result = inject::system_call<nt::NtCreateFile>(
             dst_file,                                               // FileHandle
             SYNCHRONIZE | GENERIC_WRITE,                            // DesiredAccess
@@ -115,6 +124,7 @@ class WriteFileTool final : public EventCallback {
 
         // Allocate a transfer buffer in the guest
         constexpr size_t BUFFER_SIZE = 1048576 * 2; // 2 MiB
+        // Create guest memory allocation with inject::allocate
         auto buffer = inject::allocate<char[]>(BUFFER_SIZE);
 
         // Read data into it until we hit EOF
@@ -132,6 +142,7 @@ class WriteFileTool final : public EventCallback {
                 break;
             }
 
+            // Transparently inject calls to NtWriteFile to write file contents into the guest
             result = inject::system_call<nt::NtWriteFile>(
                 dst_file, 0, nullptr, nullptr, io_status_block, buffer, count, nullptr, nullptr);
 
@@ -161,12 +172,15 @@ class WriteFileTool final : public EventCallback {
         fclose(src_file);
     }
 
+    // This is a the function called when guest event occurs (shutdown, syscalls, hypercalls, system exceptions, etc.)
     void process_event(Event& event) override {
+        // Exit if we get a startup or reboot
         if (unlikely(event.type() == EventType::EVENT_SHUTDOWN ||
                      event.type() == EventType::EVENT_REBOOT)) {
             exit(64);
         }
 
+        // Hijack syscall execution for a bit
         if (event.type() == EventType::EVENT_FAST_SYSCALL) {
             if (copy_started_.test_and_set() == 0) {
 
@@ -208,7 +222,7 @@ int main(int argc, char** argv) {
       ("help", "Display program help");
     // clang-format on
 
-    // We're not mixing with printf, improve cout performance.
+    // We're not mixing with printf, improves cout performance.
     std::cout.sync_with_stdio(false);
 
     po::variables_map vm;
@@ -228,6 +242,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // This tools only supports Windows currently
     if (domain->guest()->os() != OS::Windows) {
         std::cerr << "Unsupported OS: " << domain->guest()->os() << '\n';
         return 1;
@@ -244,9 +259,11 @@ int main(int argc, char** argv) {
         dest_file += get_filename_from_path(source_file);
     }
 
-    // Start the poll
+    // Create an instance of our tool class
     WriteFileTool tool(source_file, dest_file, vm.count("progress"));
+    // Begin polling the domain for events to pass to the tool
     domain->poll(tool);
+    return tool.result();
 }
 
 /**

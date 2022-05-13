@@ -13,6 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+/*
+
+    ivsessions prints out available Windows sessions
+
+ */
+
 #include <introvirt/introvirt.hh>
 
 #include <boost/program_options.hpp>
@@ -63,7 +70,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Pause it
+    // Pause the domain
     domain->pause();
 
     auto* windows_guest = static_cast<WindowsGuest*>(guest);

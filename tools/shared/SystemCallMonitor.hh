@@ -13,6 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+/*
+
+    The SystemCallMonitor class contains a generic method of monitoring and printing out syscalls 
+    either in a text or JSON format.
+
+ */
+
 #include <introvirt/introvirt.hh>
 
 using namespace introvirt;
@@ -22,7 +30,10 @@ class SystemCallMonitor final : public EventCallback {
   public:
     void process_event(Event& event) override {
         switch (event.type()) {
+        // This is when a syscall occurs
         case EventType::EVENT_FAST_SYSCALL: {
+            // Get handler for the syscall. 
+            // The handler automatically parses the syscall's data
             SystemCall* syscall = event.syscall().handler();
             if (unlikely(syscall == nullptr))
                 break; // Shouldn't happen I believe
@@ -35,7 +46,8 @@ class SystemCallMonitor final : public EventCallback {
             }
 
             if (likely(syscall->will_return())) {
-                // The most common case
+                // Hook the syscall's return so we can get response data
+                // and the return code
                 event.syscall().hook_return(true);
             } else {
                 if (json_)
@@ -47,6 +59,7 @@ class SystemCallMonitor final : public EventCallback {
 
             break;
         }
+        // This is when a syscall returns
         case EventType::EVENT_FAST_SYSCALL_RET: {
 
             if (json_)

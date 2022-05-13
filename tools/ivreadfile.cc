@@ -14,6 +14,13 @@
  * limitations under the License.
  */
 
+/*
+
+    ivreadfile reads a file in the guest and writes it to a location on the host.
+    Currently supports Windows.
+
+ */
+
 #include <introvirt/introvirt.hh>
 
 #include <boost/algorithm/string.hpp>
@@ -50,6 +57,7 @@ class ReadFileTool final : public EventCallback {
         result_ = 1;
 
         // Allocate some structures in the guest
+        // inject::* injects syscalls into the guest transparently to allocate memory
         auto src_path = inject::allocate<nt::UNICODE_STRING>("\\??\\" + src_path_);
         auto object_attributes = inject::allocate<nt::OBJECT_ATTRIBUTES>();
         auto io_status_block = inject::allocate<nt::IO_STATUS_BLOCK>();
@@ -60,6 +68,7 @@ class ReadFileTool final : public EventCallback {
 
         // Open the source file in the guest
         uint64_t src_file;
+        // Inject a call to NtCreateFile to create/open the file in the guest
         nt::NTSTATUS result = inject::system_call<nt::NtCreateFile>(
             src_file,                                               // FileHandle
             SYNCHRONIZE | GENERIC_READ,                             // DesiredAccess
@@ -88,11 +97,13 @@ class ReadFileTool final : public EventCallback {
 
         // Allocate a transfer buffer in the guest
         constexpr size_t BUFFER_SIZE = 1048576 * 2; // 2 MiB
+        // Create guest memory allocation with inject::allocate
         auto buffer = inject::allocate<char[]>(BUFFER_SIZE);
 
         // Read data into it until we hit EOF
         while (true) {
             // Read from the file into our buffer
+            // Inject a call to NtReadFile to read into the buffer the tool allocated
             result =
                 inject::system_call<nt::NtReadFile>(src_file, 0, nullptr, nullptr, io_status_block,
                                                     buffer, BUFFER_SIZE, nullptr, nullptr);
@@ -135,12 +146,15 @@ class ReadFileTool final : public EventCallback {
         */
     }
 
+    // This is a the function called when guest event occurs (shutdown, syscalls, hypercalls, system exceptions, etc.)
     void process_event(Event& event) override {
+        // Exit if we get a startup or reboot
         if (unlikely(event.type() == EventType::EVENT_SHUTDOWN ||
                      event.type() == EventType::EVENT_REBOOT)) {
             exit(64);
         }
 
+        // Hijack syscall execution for a bit
         if (event.type() == EventType::EVENT_FAST_SYSCALL) {
             if (copy_started_.test_and_set() == 0) {
                 copy();
@@ -199,6 +213,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // This tools only supports Windows currently
     if (domain->guest()->os() != OS::Windows) {
         std::cerr << "Unsupported OS: " << domain->guest()->os() << '\n';
         return 1;
@@ -210,8 +225,9 @@ int main(int argc, char** argv) {
     // Enable system call hooking on all vcpus
     domain->intercept_system_calls(true);
 
-    // Start the poll
+    // Create an instance of our tool class
     ReadFileTool tool(source_file, dest_file);
+    // Begin polling the domain for events to pass to the tool
     domain->poll(tool);
     return tool.result();
 }
